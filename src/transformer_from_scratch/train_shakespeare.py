@@ -1,10 +1,44 @@
 import math
 import time
+from pathlib import Path
 
 import torch
 
 from .data import CharTokenizer, get_batch, load_text, split_data
 from .model import DecoderOnlyLM
+
+DEFAULT_CKPT = Path(__file__).resolve().parents[2] / "out" / "shakespeare.pt"
+
+
+def save_checkpoint(path, model, tok, config, step, val_loss):
+    """Everything needed to rebuild the model and decode its output."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "config": config,
+            "chars": tok.chars,
+            "step": step,
+            "val_loss": val_loss,
+        },
+        path,
+    )
+
+
+def load_checkpoint(path=DEFAULT_CKPT, device=None):
+    """Returns (model, tokenizer, checkpoint dict)."""
+    device = device or pick_device()
+    ckpt = torch.load(path, map_location=device, weights_only=False)
+    model = DecoderOnlyLM(**ckpt["config"]).to(device)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+
+    tok = CharTokenizer.__new__(CharTokenizer)
+    tok.chars = ckpt["chars"]
+    tok.stoi = {c: i for i, c in enumerate(tok.chars)}
+    tok.itos = dict(enumerate(tok.chars))
+    return model, tok, ckpt
 
 
 def pick_device():
@@ -60,6 +94,7 @@ def train(
     device=None,
     text_path=None,
     sample_tokens=500,
+    ckpt_path=DEFAULT_CKPT,
 ):
     device = device or pick_device()
     torch.manual_seed(seed)
@@ -74,16 +109,17 @@ def train(
 
     # pad_id=None: language-model batches are dense, and reserving id 0 as pad
     # would silently delete whichever character maps to it.
-    model = DecoderOnlyLM(
-        tok.vocab_size,
-        n_layer,
-        d_model,
-        n_head,
-        4 * d_model,
-        dropout,
+    config = dict(
+        vocab_size=tok.vocab_size,
+        n_layer=n_layer,
+        d_model=d_model,
+        n_head=n_head,
+        d_ff=4 * d_model,
+        dropout=dropout,
         max_len=block_size,
         pad_id=None,
-    ).to(device)
+    )
+    model = DecoderOnlyLM(**config).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"params {n_params / 1e6:.2f}M | {steps} steps")
 
@@ -92,6 +128,7 @@ def train(
     )
     splits = {"train": train_ids, "val": val_ids}
     history = []
+    best_val = float("inf")
     model.train()
     t0 = time.perf_counter()
 
@@ -116,12 +153,21 @@ def train(
             ev["step"] = step + 1
             ev["elapsed"] = time.perf_counter() - t0
             history.append(ev)
+
+            saved = ""
+            if ckpt_path and ev["val"] < best_val:
+                best_val = ev["val"]
+                save_checkpoint(ckpt_path, model, tok, config, step + 1, best_val)
+                saved = "  *"
+
             print(
                 f"step {step + 1:5d}  train {ev['train']:.4f}  "
-                f"val {ev['val']:.4f}  {ev['elapsed'] / 60:5.1f} min"
+                f"val {ev['val']:.4f}  {ev['elapsed'] / 60:5.1f} min{saved}"
             )
 
     print(f"\ntotal {(time.perf_counter() - t0) / 60:.1f} min")
+    if ckpt_path:
+        print(f"best val {best_val:.4f} -> {ckpt_path}")
 
     if sample_tokens:
         start = torch.zeros((1, 1), dtype=torch.long, device=device)
