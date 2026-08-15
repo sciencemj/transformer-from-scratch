@@ -1,6 +1,5 @@
 import math
 
-import torch
 from torch import nn
 
 
@@ -60,8 +59,3 @@ class MultiHeadAttention(nn.Module):
         # (B, n_head, T_q, d_head) -> (B, T_q, d_model)
         out = out.transpose(1, 2).reshape(B, T_q, self.d_model)
         return self.Wo(out)
-
-
-def causal_mask(T, device=None):
-    """Lower-triangular (1, 1, T, T) mask: position i may attend to j <= i."""
-    return torch.ones(1, 1, T, T, dtype=torch.bool, device=device).tril()

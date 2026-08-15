@@ -9,3 +9,13 @@ wheels/
 # Virtual environments
 .venv
 .claude
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Datasets and run outputs (fetched/produced on demand)
+data/
+out/
+*.pt
+*.log
