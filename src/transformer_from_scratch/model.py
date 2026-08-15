@@ -210,7 +210,8 @@ class DecoderOnlyLM(nn.Module):
         for _ in range(max_new_tokens):
             window = ids[:, -max_len:]
             logits = self(window)[:, -1] / temperature
-            if top_k is not None:
+            # top_k <= 0 means no truncation; topk(0) would mask every logit.
+            if top_k is not None and top_k > 0:
                 kth = logits.topk(min(top_k, logits.size(-1)), dim=-1).values[:, -1:]
                 logits = logits.masked_fill(logits < kth, float("-inf"))
             nxt = torch.multinomial(logits.softmax(-1), num_samples=1)

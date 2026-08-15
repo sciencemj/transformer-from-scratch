@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 transformer-from-scratch = "transformer_from_scratch:main"
+transformer-sample = "transformer_from_scratch.sample:main"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]

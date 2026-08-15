@@ -20,7 +20,8 @@ uses `nn.MultiheadAttention` or `nn.Transformer`.
 | `tasks.py` | Synthetic copy / reverse batches |
 | `data.py` | Character tokenizer and batching for tiny shakespeare |
 | `train.py` | Training loop for the synthetic tasks |
-| `train_shakespeare.py` | Character-level language model training |
+| `train_shakespeare.py` | Character-level language model training, checkpointing |
+| `sample.py` | Generate text from a saved checkpoint |
 
 One `DecoderLayer` covers both architectures: `cross_attn=False` drops the
 middle sub-layer, which is the only structural difference between a
@@ -35,7 +36,7 @@ plain `&`.
 
 ```bash
 uv sync
-uv run pytest                                          # 43 tests
+uv run pytest                                          # 54 tests
 uv run python -m transformer_from_scratch.train        # copy / reverse tasks
 uv run python -m transformer_from_scratch.train_shakespeare
 ```
@@ -67,18 +68,52 @@ Synthetic tasks (2 layers, `d_model=64`, CPU):
 Reverse needs the attention to learn an `i -> n-i` mapping, so it takes
 noticeably longer than copy's identity mapping.
 
-Tiny shakespeare, character level (4 layers, `d_model=256`, block 128, 3.19M
-params, 5000 steps, ~5 min on an M-series GPU):
+Tiny shakespeare, character level. Two runs, same code:
+
+| Config | Params | Hardware | Time | Best val |
+| --- | --- | --- | --- | --- |
+| 4 layers, `d_model=256`, block 128 | 3.19M | M-series GPU | 5 min | 1.574 |
+| 6 layers, `d_model=384`, block 256 | 10.7M | RTX 3060 Ti | 19 min | **1.444** |
+
+The larger run matches nanoGPT's configuration for this dataset, whose
+published validation loss is about 1.48.
 
 | Step | Train | Val |
 | --- | --- | --- |
-| 1 | 5.12 | 5.12 |
-| 1000 | 1.67 | 1.84 |
-| 2500 | 1.45 | 1.65 |
-| 5000 | 1.36 | 1.57 |
+| 1 | 4.654 | 4.659 |
+| 1000 | 1.356 | 1.579 |
+| 2000 | 1.183 | 1.490 |
+| 3500 | 1.046 | **1.444** |
+| 5000 | 0.984 | 1.461 |
 
-Validation loss was still falling at the end, so this is undertrained rather
-than converged.
+Validation loss bottoms out around step 3500 and rises after it while training
+loss keeps falling, so the checkpoint kept is the one from 3500, not the last.
+
+## Generating text
+
+```bash
+uv run python -m transformer_from_scratch.sample --prompt "ROMEO:" --tokens 300
+uv run python -m transformer_from_scratch.sample --temperature 0.5 --top-k 20 --seed 0
+```
+
+`--top-k 0` disables truncation. Metadata goes to stderr, so redirecting stdout
+captures only the generated text. Prompts may only use characters that appear
+in the training corpus.
+
+From the 10.7M model:
+
+```
+MENENIUS:
+Beseech you, as far off more than he enter to get the
+by-good man that he could speak upon him, whose advance
+between the warrant of his followers.
+
+COMINIUS:
+Why?
+
+MENENIUS:
+He's sentenced; I'll see him here in the city.
+```
 
 ## Testing
 
